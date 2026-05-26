@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# TensorFlow / PyTorch models (large binaries)
+backend/models/*.h5
+backend/models/*.pt
+backend/models/*.keras
+backend/models/*.onnx
+
+# Data (raw images — use DVC or download scripts)
+backend/data/raw/
+backend/data/processed/
+*.npy
+*.csv
+
+# Logs
+logs/
+*.log
+tensorboard_logs/
+
+# Environment
+.env
+*.env.local
+
+# Node / React
+node_modules/
+web/dist/
+web/.vite/
+mobile/node_modules/
+mobile/android/
+mobile/ios/
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Jupyter
+.ipynb_checkpoints/
