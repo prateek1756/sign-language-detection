@@ -175,9 +175,11 @@ def evaluate(model_name: str, split: str = "test") -> dict:
         print(f"  {cls_name:<10} {correct:>8} {total:>8} {cls_acc:>7.1%}  {bar}")
 
     # ── Classification Report ──────────────────────────────────────────────
+    # Use only the class names that appear in the actual predictions
+    actual_class_names = [ASL_CLASSES[i] for i in sorted(set(y_int.tolist()))]
     report = classification_report(
         y_int, y_pred,
-        target_names=ASL_CLASSES,
+        target_names=actual_class_names,
         zero_division=0,
     )
     print("\n  Classification Report:")
@@ -205,7 +207,8 @@ def _plot_confusion_matrix(
     split: str,
 ) -> None:
     """Save a normalized confusion matrix heatmap as PNG."""
-    cm = confusion_matrix(y_true, y_pred, normalize="true")  # row-normalized
+    actual_class_names = [ASL_CLASSES[i] for i in sorted(set(y_true.tolist()))]
+    cm = confusion_matrix(y_true, y_pred, normalize="true")
 
     fig, ax = plt.subplots(figsize=(16, 14))
     sns.heatmap(
@@ -213,8 +216,8 @@ def _plot_confusion_matrix(
         annot=True,
         fmt=".2f",
         cmap="Blues",
-        xticklabels=ASL_CLASSES,
-        yticklabels=ASL_CLASSES,
+        xticklabels=actual_class_names,
+        yticklabels=actual_class_names,
         linewidths=0.4,
         ax=ax,
         annot_kws={"size": 7},
