@@ -32,6 +32,9 @@ tensorboard_logs/
 # Environment
 .env
 *.env.local
+web/.env
+web/.env.production
+web/.env.local
 
 # Node / React
 node_modules/
