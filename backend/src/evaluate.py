@@ -89,7 +89,7 @@ def _load_test_data(
         jittered tiles). Acceptable for validation; real accuracy requires
         genuine video sequences.
     """
-    X_tr, X_val, X_test, y_tr_ohe, y_val_ohe, y_test_ohe = load_landmark_data()
+    X_tr, X_val, X_test, y_tr_ohe, y_val_ohe, y_test_ohe, _ = load_landmark_data()
 
     split_map = {
         "train": (X_tr, y_tr_ohe),
