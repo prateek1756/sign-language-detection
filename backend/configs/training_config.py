@@ -91,7 +91,9 @@ class MLPConfig:
         d["timestamp"] = datetime.now().isoformat()
         s = json.dumps(d, indent=2)
         if path:
-            Path(path).write_text(s)
+            path = Path(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(s)
         return s
 
 
@@ -147,7 +149,9 @@ class LSTMConfig:
         d["timestamp"] = datetime.now().isoformat()
         s = json.dumps(d, indent=2)
         if path:
-            Path(path).write_text(s)
+            path = Path(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(s)
         return s
 
 
@@ -206,5 +210,7 @@ class CNNConfig:
         d["timestamp"]    = datetime.now().isoformat()
         s = json.dumps(d, indent=2)
         if path:
-            Path(path).write_text(s)
+            path = Path(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(s)
         return s
