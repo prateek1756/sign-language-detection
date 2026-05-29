@@ -85,6 +85,27 @@ def load_landmark_data(
 
     log.info("Loaded data — X: %s  y: %s  classes: %d", X.shape, y.shape, NUM_CLASSES)
 
+    # ── Filter out classes with fewer than 3 samples (can't stratify-split) ──
+    unique, counts = np.unique(y, return_counts=True)
+    min_samples_needed = max(3, int(1 / min(val_size, test_size)) + 1)
+    valid_classes = unique[counts >= min_samples_needed]
+    removed = unique[counts < min_samples_needed]
+    if len(removed) > 0:
+        log.warning(
+            "Removing %d class(es) with fewer than %d samples: %s",
+            len(removed), min_samples_needed,
+            [ASL_CLASSES[i] for i in removed if i < len(ASL_CLASSES)]
+        )
+        mask = np.isin(y, valid_classes)
+        X, y = X[mask], y[mask]
+        log.info("After filtering: X=%s  y=%s", X.shape, y.shape)
+
+    if len(X) == 0:
+        raise ValueError(
+            "No samples remain after filtering. "
+            "Preprocessing likely failed — check that MediaPipe detected hands in the images."
+        )
+
     # One-hot encode
     lb = LabelBinarizer()
     y_ohe = lb.fit_transform(y)                     # (N, 29)
