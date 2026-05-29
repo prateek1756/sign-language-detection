@@ -242,6 +242,8 @@ def make_callbacks(
 def train_mlp(cfg: MLPConfig | None = None) -> keras.Model:
     """Train the MLP landmark classifier and save best checkpoint."""
     cfg = cfg or MLPConfig()
+    cfg.log_dir.mkdir(parents=True, exist_ok=True)
+    cfg.save_dir.mkdir(parents=True, exist_ok=True)
     cfg.to_json(cfg.log_dir / "config.json")
 
     X_tr, X_val, X_test, y_tr, y_val, y_test = load_landmark_data()
@@ -294,6 +296,8 @@ def train_mlp(cfg: MLPConfig | None = None) -> keras.Model:
 def train_lstm(cfg: LSTMConfig | None = None) -> keras.Model:
     """Train the BiLSTM sequence classifier."""
     cfg = cfg or LSTMConfig()
+    cfg.log_dir.mkdir(parents=True, exist_ok=True)
+    cfg.save_dir.mkdir(parents=True, exist_ok=True)
     cfg.to_json(cfg.log_dir / "config.json")
 
     X_tr, X_val, X_test, y_tr, y_val, y_test = load_landmark_data()
@@ -354,6 +358,8 @@ def train_cnn(cfg: CNNConfig | None = None) -> keras.Model | None:
     Returns None if image crops are not available (graceful degradation).
     """
     cfg = cfg or CNNConfig()
+    cfg.log_dir.mkdir(parents=True, exist_ok=True)
+    cfg.save_dir.mkdir(parents=True, exist_ok=True)
     cfg.to_json(cfg.log_dir / "config.json")
 
     try:
