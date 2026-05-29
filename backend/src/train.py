@@ -98,7 +98,10 @@ def load_landmark_data(
         )
         mask = np.isin(y, valid_classes)
         X, y = X[mask], y[mask]
-        log.info("After filtering: X=%s  y=%s", X.shape, y.shape)
+        # Remap labels to be contiguous (0, 1, 2, ...) after removal
+        label_map = {old: new for new, old in enumerate(sorted(valid_classes))}
+        y = np.array([label_map[lbl] for lbl in y], dtype=np.int32)
+        log.info("After filtering: X=%s  y=%s  classes=%d", X.shape, y.shape, len(valid_classes))
 
     if len(X) == 0:
         raise ValueError(
@@ -106,17 +109,19 @@ def load_landmark_data(
             "Preprocessing likely failed — check that MediaPipe detected hands in the images."
         )
 
-    # One-hot encode
-    lb = LabelBinarizer()
-    y_ohe = lb.fit_transform(y)                     # (N, 29)
+    actual_num_classes = len(np.unique(y))
+    log.info("Actual number of classes for training: %d", actual_num_classes)
 
-    # Stratified split: train / (val + test)
+    # One-hot encode using actual number of classes
+    lb = LabelBinarizer()
+    y_ohe = lb.fit_transform(y)  # shape: (N, actual_num_classes)
+
+    # Stratified split
     X_tr, X_tmp, y_tr, y_tmp = train_test_split(
         X, y_ohe, test_size=val_size + test_size,
         random_state=seed, stratify=y,
     )
     rel_test = test_size / (val_size + test_size)
-    # Bug fix: also stratify the val/test split to preserve class balance
     X_val, X_test, y_val, y_test = train_test_split(
         X_tmp, y_tmp, test_size=rel_test,
         random_state=seed,
@@ -124,10 +129,10 @@ def load_landmark_data(
     )
 
     log.info(
-        "Split — train: %d  val: %d  test: %d",
-        len(X_tr), len(X_val), len(X_test),
+        "Split — train: %d  val: %d  test: %d  classes: %d",
+        len(X_tr), len(X_val), len(X_test), actual_num_classes,
     )
-    return X_tr, X_val, X_test, y_tr, y_val, y_test
+    return X_tr, X_val, X_test, y_tr, y_val, y_test, actual_num_classes
 
 
 def build_sequence_dataset(
@@ -267,7 +272,8 @@ def train_mlp(cfg: MLPConfig | None = None) -> keras.Model:
     cfg.save_dir.mkdir(parents=True, exist_ok=True)
     cfg.to_json(cfg.log_dir / "config.json")
 
-    X_tr, X_val, X_test, y_tr, y_val, y_test = load_landmark_data()
+    X_tr, X_val, X_test, y_tr, y_val, y_test, actual_classes = load_landmark_data()
+    cfg.num_classes = actual_classes  # match model output to actual data classes
 
     model = build_mlp(cfg)
     compile_model(
@@ -321,7 +327,8 @@ def train_lstm(cfg: LSTMConfig | None = None) -> keras.Model:
     cfg.save_dir.mkdir(parents=True, exist_ok=True)
     cfg.to_json(cfg.log_dir / "config.json")
 
-    X_tr, X_val, X_test, y_tr, y_val, y_test = load_landmark_data()
+    X_tr, X_val, X_test, y_tr, y_val, y_test, actual_classes = load_landmark_data()
+    cfg.num_classes = actual_classes  # match model output to actual data classes
 
     train_ds = build_sequence_dataset(X_tr, y_tr, cfg.sequence_len, cfg.batch_size)
     val_ds   = build_sequence_dataset(X_val, y_val, cfg.sequence_len, cfg.batch_size, shuffle=False)
