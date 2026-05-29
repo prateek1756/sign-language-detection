@@ -50,8 +50,28 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 # ── Lifespan: load models once at startup ────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load ML models at startup so the first request is not slow."""
+    """
+    Startup sequence:
+      1. Download any missing .keras models from Google Drive (if URLs configured)
+      2. Load models into the InferenceEngine
+      3. Attach engine to app.state for use by route handlers
+    """
     log.info("🚀 Starting Sign Language Detection API...")
+
+    # Step 1: Download missing models from Google Drive
+    try:
+        from src.download_models import download_models_if_missing
+        download_results = download_models_if_missing()
+        available = [f for f, ok in download_results.items() if ok]
+        missing   = [f for f, ok in download_results.items() if not ok]
+        if available:
+            log.info("📦 Models available: %s", available)
+        if missing:
+            log.warning("⚠️  Models not available (predictions will return 503): %s", missing)
+    except Exception as exc:
+        log.warning("⚠️  Model download step failed (continuing without): %s", exc)
+
+    # Step 2: Load models into InferenceEngine
     try:
         from src.inference import engine
         loaded = engine.ensure_models_loaded()
@@ -60,6 +80,7 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         log.warning("⚠️  Model loading failed (running without models): %s", exc)
         app.state.engine = None
+
     yield
     log.info("👋 Shutting down.")
 

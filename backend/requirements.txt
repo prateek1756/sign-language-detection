@@ -36,3 +36,6 @@ onnxruntime==1.18.0          # validate exported ONNX models locally
 
 # ── API Rate Limiting ─────────────────────────────────────────────────────────
 slowapi==0.1.9               # rate limiting middleware for FastAPI
+
+# ── Model Download ────────────────────────────────────────────────────────────
+gdown==5.2.0                 # download .keras models from Google Drive at startup
