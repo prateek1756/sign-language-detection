@@ -34,6 +34,29 @@ import mediapipe as mp
 import numpy as np
 from tqdm import tqdm
 
+# ── MediaPipe API compatibility ───────────────────────────────────────────────
+# mediapipe >= 0.10.18 removed mp.solutions in favour of mp.tasks.
+# We detect which API is available and provide a unified Hands wrapper.
+_MP_VERSION = tuple(int(x) for x in mp.__version__.split(".")[:3])
+_USE_LEGACY_API = hasattr(mp, "solutions") and hasattr(mp.solutions, "hands")
+
+if not _USE_LEGACY_API:
+    # New Tasks API (mediapipe >= 0.10.18)
+    from mediapipe.tasks import python as _mp_tasks
+    from mediapipe.tasks.python import vision as _mp_vision
+    import urllib.request as _urllib_request
+    import tempfile as _tempfile
+    import os as _os
+
+    # Download the hand landmarker model if not cached
+    _MODEL_PATH = _os.path.join(_tempfile.gettempdir(), "hand_landmarker.task")
+    if not _os.path.exists(_MODEL_PATH):
+        _MODEL_URL = (
+            "https://storage.googleapis.com/mediapipe-models/"
+            "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+        )
+        _urllib_request.urlretrieve(_MODEL_URL, _MODEL_PATH)
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -97,26 +120,79 @@ class PreprocessConfig:
 
 
 # ── MediaPipe ─────────────────────────────────────────────────────────────────
-def build_static_hands() -> mp.solutions.hands.Hands:
+def build_static_hands():
     """
-    Build MediaPipe Hands in static image mode for offline preprocessing.
+    Build a MediaPipe Hands processor compatible with both old and new APIs.
 
-    computer-vision-expert note:
-      static_image_mode=True treats each image independently (no tracking),
-      which is correct for offline batch processing.
+    - mediapipe < 0.10.18  : uses mp.solutions.hands.Hands (legacy)
+    - mediapipe >= 0.10.18 : uses mp.tasks HandLandmarker (new Tasks API)
+
+    Returns an object with a .process(rgb_image) method that returns
+    a result with .multi_hand_landmarks compatible with the rest of the code.
     """
-    return mp.solutions.hands.Hands(
-        static_image_mode=True,
-        max_num_hands=1,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5,
-    )
+    if _USE_LEGACY_API:
+        return mp.solutions.hands.Hands(
+            static_image_mode=True,
+            max_num_hands=1,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+    else:
+        # New Tasks API wrapper that mimics the legacy interface
+        options = _mp_vision.HandLandmarkerOptions(
+            base_options=_mp_tasks.BaseOptions(model_asset_path=_MODEL_PATH),
+            running_mode=_mp_vision.RunningMode.IMAGE,
+            num_hands=1,
+            min_hand_detection_confidence=0.5,
+            min_hand_presence_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+        landmarker = _mp_vision.HandLandmarker.create_from_options(options)
+
+        class _LandmarkResult:
+            """Mimics mp.solutions.hands result for backward compatibility."""
+            def __init__(self, landmarks_list):
+                self.multi_hand_landmarks = landmarks_list
+
+        class _LandmarkPoint:
+            def __init__(self, x, y, z):
+                self.x = x
+                self.y = y
+                self.z = z
+
+        class _HandGroup:
+            def __init__(self, landmarks):
+                self.landmark = landmarks
+
+        class _HandsWrapper:
+            def __init__(self, lm):
+                self._lm = lm
+
+            def process(self, rgb_image):
+                mp_image = _mp_vision.Image(
+                    image_format=_mp_vision.ImageFormat.SRGB,
+                    data=rgb_image,
+                )
+                result = self._lm.detect(mp_image)
+                if not result.hand_landmarks:
+                    return _LandmarkResult(None)
+                # Convert NormalizedLandmark list to legacy format
+                hand_group = _HandGroup([
+                    _LandmarkPoint(lm.x, lm.y, lm.z)
+                    for lm in result.hand_landmarks[0]
+                ])
+                return _LandmarkResult([hand_group])
+
+            def close(self):
+                self._lm.close()
+
+        return _HandsWrapper(landmarker)
 
 
 # ── Landmark Extraction ───────────────────────────────────────────────────────
 def extract_landmarks(
     image_bgr: np.ndarray,
-    hands: mp.solutions.hands.Hands,
+    hands,
 ) -> Optional[np.ndarray]:
     """
     Extract 21 hand landmarks from an image.
@@ -186,7 +262,7 @@ def normalize_landmarks(raw: np.ndarray) -> np.ndarray:
 # ── Image Crop Extraction ─────────────────────────────────────────────────────
 def extract_hand_crop(
     image_bgr: np.ndarray,
-    hands_result: mp.solutions.hands.Hands,
+    hands_result,
     crop_size: int = 224,
     padding_ratio: float = 0.2,
 ) -> Optional[np.ndarray]:
@@ -316,7 +392,7 @@ def augment_landmarks(landmarks: np.ndarray) -> list[np.ndarray]:
 def process_class(
     class_label: str,
     cfg: PreprocessConfig,
-    hands: mp.solutions.hands.Hands,
+    hands,
 ) -> tuple[list[np.ndarray], list[int]]:
     """
     Process all images for a single ASL class.
@@ -363,10 +439,9 @@ def process_class(
         # Save image crop for CNN model
         if cfg.output_crops:
             rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            results = mp.solutions.hands.Hands(
-                static_image_mode=True, max_num_hands=1
-            ).process(rgb)
-            crop = extract_hand_crop(image, results, cfg.crop_size, cfg.padding_ratio)
+            # Reuse the shared hands processor for crop extraction
+            crop_result = hands.process(rgb)
+            crop = extract_hand_crop(image, crop_result, cfg.crop_size, cfg.padding_ratio)
             if crop is not None:
                 crop_dir = CROPS_DIR / class_label
                 crop_dir.mkdir(exist_ok=True)
