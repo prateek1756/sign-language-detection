@@ -55,16 +55,16 @@ REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _get_model_path(model_name: str) -> Path:
-    path = MODELS_DIR / f"{model_name}.keras"
+    # Use module-level MODELS_DIR so callers can patch it at runtime
+    models_dir = MODELS_DIR
+    path = models_dir / f"{model_name}.keras"
     if not path.exists():
-        # Try best checkpoint
-        path = MODELS_DIR / f"{model_name}_best.keras"
+        path = models_dir / f"{model_name}_best.keras"
     if not path.exists():
-        # Build a user-friendly CLI hint
         cli_map = {"asl_mlp": "mlp", "asl_lstm": "lstm", "asl_mobilenet": "cnn"}
         cli_arg = cli_map.get(model_name, model_name)
         raise FileNotFoundError(
-            f"No saved model found for '{model_name}' in {MODELS_DIR}.\n"
+            f"No saved model found for '{model_name}' in {models_dir}.\n"
             f"Run: python src/train.py --model {cli_arg}"
         )
     return path
