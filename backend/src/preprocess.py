@@ -169,8 +169,8 @@ def build_static_hands():
                 self._lm = lm
 
             def process(self, rgb_image):
-                mp_image = _mp_vision.Image(
-                    image_format=_mp_vision.ImageFormat.SRGB,
+                mp_image = mp.Image(
+                    image_format=mp.ImageFormat.SRGB,
                     data=rgb_image,
                 )
                 result = self._lm.detect(mp_image)
