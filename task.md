@@ -70,10 +70,12 @@
 - [x] Implement `notebooks/train_mlp.ipynb` — MLP training on Colab T4 GPU
 - [x] Implement `notebooks/train_lstm.ipynb` — BiLSTM training on Colab T4 GPU
 - [x] Implement `notebooks/train_cnn.ipynb` — MobileNetV3 fine-tune on Colab T4 GPU
-- [ ] Implement `backend/src/download_models.py` — gdown from Google Drive at startup
-- [ ] Wire `download_models_if_missing()` into `main.py` lifespan()
-- [ ] **ACTION REQUIRED:** Run notebooks on Colab, save trained models to Google Drive
-- [ ] Set GDRIVE_MODEL_URL_* env vars in .env
+- [x] Implement `backend/src/download_models.py` — gdown from Google Drive at startup
+- [x] Wire `download_models_if_missing()` into `main.py` lifespan()
+- [x] Add `gdown==5.2.0` to requirements.txt
+- [x] Update `.env.example` with GDRIVE_MODEL_URL_* vars
+- [ ] **ACTION REQUIRED:** Run notebooks on Colab → save .keras files to Google Drive
+- [ ] **ACTION REQUIRED:** Set GDRIVE_MODEL_URL_* env vars in .env after training
 
 ## Phase 6 — Mobile App (React Native)
 - [ ] Camera setup (expo-camera)
