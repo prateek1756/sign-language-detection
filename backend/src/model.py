@@ -39,10 +39,13 @@ _DEVICE: str = "CPU"
 
 def configure_gpu(mixed_precision: bool = False) -> str:
     """
-    Auto-detect GPU and optionally enable mixed precision.
+    Auto-detect GPU and enable memory growth.
 
-    Idempotent: safe to call multiple times. GPU memory-growth and mixed-
-    precision policy are set at most once per interpreter session.
+    Mixed precision via set_global_policy() is intentionally disabled —
+    it corrupts Functional model internals in Keras 3 (missing _dtype_policy,
+    _parent_path attributes). The output layers already use dtype='float32'
+    which is the only requirement for numerical stability with float16 compute.
+    GPU memory growth is the only session-level side-effect applied here.
     """
     global _GPU_CHECKED, _DEVICE
 
@@ -53,17 +56,16 @@ def configure_gpu(mixed_precision: bool = False) -> str:
         _GPU_CHECKED = True
         if gpus:
             for gpu in gpus:
-                # Must be set before any model is built; raises if called twice
-                tf.config.experimental.set_memory_growth(gpu, True)
+                try:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                except RuntimeError:
+                    pass  # already set — safe to ignore
             log.info("✅ GPU detected: %s", [g.name for g in gpus])
         else:
             log.info("ℹ️  No GPU found — running on CPU.")
 
-    if mixed_precision and gpus:
-        current_policy = tf.keras.mixed_precision.global_policy().name
-        if current_policy != "mixed_float16":
-            tf.keras.mixed_precision.set_global_policy("mixed_float16")
-            log.info("⚡ Mixed precision (float16) enabled.")
+    if mixed_precision:
+        log.info("ℹ️  mixed_precision=True noted but global policy not set (Keras 3 compatibility).")
 
     return _DEVICE
 
