@@ -102,8 +102,10 @@ def build_mlp(cfg: "MLPConfig") -> keras.Model:
     out = layers.Activation("softmax", dtype="float32", name="predictions")(out)
 
     model = keras.Model(inputs=inp, outputs=out, name="ASL_MLP")
-    model.build(input_shape=(None, cfg.input_dim))
-    log.info("MLP built — params: %s", model.count_params())
+    try:
+        log.info("MLP built — params: %s", model.count_params())
+    except Exception:
+        log.info("MLP built — (param count unavailable on this Keras version)")
     return model
 
 
@@ -148,8 +150,10 @@ def build_lstm(cfg: "LSTMConfig") -> keras.Model:
     out = layers.Activation("softmax", dtype="float32", name="predictions")(out)
 
     model = keras.Model(inputs=inp, outputs=out, name="ASL_LSTM")
-    model.build(input_shape=(None, cfg.sequence_len, cfg.input_dim))
-    log.info("LSTM built — params: %s", model.count_params())
+    try:
+        log.info("LSTM built — params: %s", model.count_params())
+    except Exception:
+        log.info("LSTM built — (param count unavailable on this Keras version)")
     return model
 
 
@@ -184,12 +188,14 @@ def build_cnn(cfg: "CNNConfig") -> keras.Model:
     out = layers.Activation("softmax", dtype="float32", name="predictions")(out)
 
     model = keras.Model(inputs=inp, outputs=out, name="ASL_MobileNetV3")
-    model.build(input_shape=(None, *cfg.input_shape))
-    log.info(
-        "CNN built — base params: %s  head params: %s",
-        base.count_params(),
-        model.count_params() - base.count_params(),
-    )
+    try:
+        log.info(
+            "CNN built — base params: %s  head params: %s",
+            base.count_params(),
+            model.count_params() - base.count_params(),
+        )
+    except Exception:
+        log.info("CNN built — (param count unavailable on this Keras version)")
     return model
 
 
