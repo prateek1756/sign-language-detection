@@ -102,6 +102,7 @@ def build_mlp(cfg: "MLPConfig") -> keras.Model:
     out = layers.Activation("softmax", dtype="float32", name="predictions")(out)
 
     model = keras.Model(inputs=inp, outputs=out, name="ASL_MLP")
+    model.build(input_shape=(None, cfg.input_dim))
     log.info("MLP built — params: %s", model.count_params())
     return model
 
@@ -147,6 +148,7 @@ def build_lstm(cfg: "LSTMConfig") -> keras.Model:
     out = layers.Activation("softmax", dtype="float32", name="predictions")(out)
 
     model = keras.Model(inputs=inp, outputs=out, name="ASL_LSTM")
+    model.build(input_shape=(None, cfg.sequence_len, cfg.input_dim))
     log.info("LSTM built — params: %s", model.count_params())
     return model
 
@@ -182,6 +184,7 @@ def build_cnn(cfg: "CNNConfig") -> keras.Model:
     out = layers.Activation("softmax", dtype="float32", name="predictions")(out)
 
     model = keras.Model(inputs=inp, outputs=out, name="ASL_MobileNetV3")
+    model.build(input_shape=(None, *cfg.input_shape))
     log.info(
         "CNN built — base params: %s  head params: %s",
         base.count_params(),
