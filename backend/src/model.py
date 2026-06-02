@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
-import keras.regularizers as regularizers
 
 if TYPE_CHECKING:
     from configs.training_config import CNNConfig, LSTMConfig, MLPConfig
@@ -92,7 +91,6 @@ def build_mlp(cfg: "MLPConfig") -> keras.Model:
     for i, units in enumerate(cfg.hidden_dims):
         x = layers.Dense(
             units,
-            kernel_regularizer=regularizers.L2(cfg.weight_decay),
             name=f"dense_{i}",
         )(x)
         if cfg.use_batch_norm:
