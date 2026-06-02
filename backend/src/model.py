@@ -23,7 +23,8 @@ from typing import TYPE_CHECKING
 
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow.keras import layers, regularizers
+from tensorflow.keras import layers
+import keras.regularizers as regularizers
 
 if TYPE_CHECKING:
     from configs.training_config import CNNConfig, LSTMConfig, MLPConfig
