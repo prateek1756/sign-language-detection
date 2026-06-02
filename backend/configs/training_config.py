@@ -67,7 +67,7 @@ class MLPConfig:
     weight_decay:      float = 1e-4               # L2 regularization
 
     # Optimizer
-    optimizer: Literal["adam", "adamw", "sgd"] = "adamw"
+    optimizer: Literal["adam", "adamw", "sgd"] = "adam"
 
     # Mixed precision (ml-engineer: free ~30% speedup on GPU)
     mixed_precision: bool = False                  # Enable if NVIDIA GPU available

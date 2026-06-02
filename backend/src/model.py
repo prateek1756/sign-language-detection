@@ -223,20 +223,23 @@ def compile_model(
     model: keras.Model,
     learning_rate: float,
     label_smoothing: float = 0.0,
-    optimizer_name: str = "adamw",
+    optimizer_name: str = "adam",
     gradient_clip: float | None = None,
 ) -> None:
-    """Compile a model with the given optimizer and loss settings."""
+    """Compile a model with the given optimizer and loss settings.
+
+    Note: AdamW is intentionally avoided — it triggers _dtype_policy AttributeError
+    on Functional models in Keras 3.x. Use Adam with L2 regularization in layers instead.
+    """
     opt_kwargs: dict = {"learning_rate": learning_rate}
     if gradient_clip is not None:
         opt_kwargs["clipnorm"] = gradient_clip
 
-    optimizers = {
-        "adam":  keras.optimizers.Adam,
-        "adamw": keras.optimizers.AdamW,
-        "sgd":   keras.optimizers.SGD,
-    }
-    optimizer = optimizers.get(optimizer_name, keras.optimizers.AdamW)(**opt_kwargs)
+    # Use Adam for all cases — AdamW breaks Functional models in Keras 3
+    if optimizer_name == "sgd":
+        optimizer = keras.optimizers.SGD(**opt_kwargs)
+    else:
+        optimizer = keras.optimizers.Adam(**opt_kwargs)
 
     model.compile(
         optimizer=optimizer,
