@@ -57,3 +57,5 @@ desktop.ini
 
 # Jupyter
 .ipynb_checkpoints/
+notebooks/kaggle.json
+*.zip

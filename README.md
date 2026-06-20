@@ -61,6 +61,39 @@ npx expo start
 
 ---
 
+## 🌐 Deployment
+
+### Backend (Railway)
+1. Register/Login to [Railway](https://railway.app).
+2. Create a new project and connect this GitHub repository.
+3. Configure the Railway service root directory to `backend/` (Railway will automatically build using the `backend/Dockerfile`).
+4. Set the following environment variables under **Settings**:
+   - `PORT`: `8000`
+   - `CORS_ORIGINS`: `http://localhost:5173,https://your-frontend.vercel.app`
+   - `GDRIVE_MODEL_URL_MLP`: Direct download link for `asl_mlp.onnx` / `asl_mlp.keras` (if downloading on lifespan startup).
+   - `GDRIVE_MODEL_URL_LSTM`: Direct download link for `asl_lstm.onnx` / `asl_lstm.keras`.
+   - `GDRIVE_MODEL_URL_CNN`: Direct download link for `asl_mobilenet.keras`.
+
+### Web Frontend (Vercel)
+1. Register/Login to [Vercel](https://vercel.com).
+2. Connect your GitHub repository.
+3. Set the **Root Directory** to `web`.
+4. Configure the build settings:
+   - Build Command: `npm run build`
+   - Output Directory: `dist`
+5. Under environment variables, add:
+   - `VITE_WS_URL`: `wss://your-backend.railway.app/ws/stream`
+6. Click **Deploy**. SPA routing fallback is handled automatically via `web/vercel.json`.
+
+### Mobile App (Expo Go)
+1. Install **Expo Go** on your physical iOS or Android device.
+2. In the `mobile/` directory, start the development server: `npm run start` (or `npx expo start`).
+3. Scan the terminal's QR code with your phone.
+4. Once loaded, click the **Settings (⚙️)** button in the top right.
+5. Update the WebSocket URL (e.g. `ws://192.168.1.X:8000/ws/stream` for local testing on the same Wi-Fi, or `wss://your-backend.railway.app/ws/stream` for production) and tap **Connect**.
+
+---
+
 ## 📁 Project Structure
 
 ```

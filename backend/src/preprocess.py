@@ -118,6 +118,13 @@ class PreprocessConfig:
     output_crops: bool = True
     """Save image crops for CNN model."""
 
+    align_rotation: bool = False
+    """Rotate landmarks relative to the palm plane (rotation invariant)."""
+
+    get_geometric: bool = False
+    """Compute and append 14 scale/rotation invariant geometric features (results in 77 features)."""
+
+
 
 # ── MediaPipe ─────────────────────────────────────────────────────────────────
 def build_static_hands():
@@ -221,29 +228,130 @@ def extract_landmarks(
 
 
 # ── Normalization ─────────────────────────────────────────────────────────────
-def normalize_landmarks(raw: np.ndarray) -> np.ndarray:
+def align_palm_plane(landmarks: np.ndarray) -> np.ndarray:
+    """
+    Rotate 3D landmarks relative to the palm plane to achieve rotation invariance.
+    Origin is wrist (0), Index MCP (5) defines Y-axis,
+    Pinky MCP (17) defines the plane.
+    landmarks shape: (21, 3), already translated relative to wrist.
+    """
+    p5 = landmarks[5]
+    p17 = landmarks[17]
+
+    # Define Y-axis (from wrist to index MCP)
+    norm_p5 = np.linalg.norm(p5)
+    y_axis = p5 / (norm_p5 + 1e-8)
+
+    # Define temp vector for Pinky MCP
+    norm_p17 = np.linalg.norm(p17)
+    v_tmp = p17 / (norm_p17 + 1e-8)
+
+    # Z-axis (palm normal) is perpendicular to Y-axis and v_tmp
+    z_raw = np.cross(y_axis, v_tmp)
+    z_norm = np.linalg.norm(z_raw)
+    z_axis = z_raw / (z_norm + 1e-8)
+
+    # X-axis (transverse) is perpendicular to Y and Z
+    x_raw = np.cross(y_axis, z_axis)
+    x_norm = np.linalg.norm(x_raw)
+    x_axis = x_raw / (x_norm + 1e-8)
+
+    # Rotation matrix R with columns [x_axis, y_axis, z_axis]
+    R = np.stack([x_axis, y_axis, z_axis], axis=1)  # shape: (3, 3)
+
+    # Rotate landmarks: landmarks_rotated = landmarks @ R
+    rotated = landmarks @ R
+    return rotated
+
+
+def compute_geometric_features(landmarks: np.ndarray) -> np.ndarray:
+    """
+    Compute 14 scale- and rotation-invariant geometric features:
+      - 5 Fingertip-to-Wrist normalized distances
+      - 4 Tip-to-Tip normalized distances
+      - 5 Joint Bending Angles (in radians)
+    landmarks shape: (21, 3), translated and normalized.
+    """
+    features = []
+    
+    # 1. Fingertip-to-wrist normalized distances
+    tips = [4, 8, 12, 16, 20]
+    for tip in tips:
+        dist = np.linalg.norm(landmarks[tip])
+        features.append(dist)
+        
+    # 2. Tip-to-Tip normalized distances
+    for i in range(len(tips) - 1):
+        dist = np.linalg.norm(landmarks[tips[i]] - landmarks[tips[i+1]])
+        features.append(dist)
+        
+    # 3. Joint Bending Angles (5 features)
+    finger_vectors = [
+        (landmarks[2] - landmarks[1], landmarks[4] - landmarks[3]),  # Thumb
+        (landmarks[6] - landmarks[5], landmarks[8] - landmarks[7]),  # Index
+        (landmarks[10] - landmarks[9], landmarks[12] - landmarks[11]),  # Middle
+        (landmarks[14] - landmarks[13], landmarks[16] - landmarks[15]),  # Ring
+        (landmarks[18] - landmarks[17], landmarks[20] - landmarks[19]),  # Pinky
+    ]
+    
+    for v1, v2 in finger_vectors:
+        norm1 = np.linalg.norm(v1)
+        norm2 = np.linalg.norm(v2)
+        if norm1 < 1e-8 or norm2 < 1e-8:
+            angle = 0.0
+        else:
+            cosine = np.dot(v1, v2) / (norm1 * norm2)
+            cosine = np.clip(cosine, -1.0, 1.0)
+            angle = np.arccos(cosine)
+        features.append(angle)
+        
+    return np.array(features, dtype=np.float32)
+
+
+def normalize_landmarks(
+    raw: np.ndarray,
+    width: int = 1,
+    height: int = 1,
+    align_rotation: bool = False,
+    get_geometric: bool = False,
+) -> np.ndarray:
     """
     Normalize raw landmark coordinates for translation + scale invariance.
 
     Method (data-scientist pattern — makes model location/size invariant):
-      1. Translation invariance: subtract wrist position (landmark 0)
+      1. Aspect ratio correction: scale x-coordinates by width/height so
+         spatial dimensions are physical and isotropic.
+      2. Translation invariance: subtract wrist position (landmark 0)
          → hand can be anywhere in frame
-      2. Scale invariance: divide by bounding box diagonal
+      3. (Optional) Rotate to canonical palm plane alignment (FreiHAND style)
+      4. Scale invariance: divide by bounding box diagonal (xy only)
          → hand can be any size / distance from camera
 
     Args:
         raw: Flat array of shape (63,) = 21 landmarks × (x, y, z).
+        width: Width of the source image.
+        height: Height of the source image.
+        align_rotation: Whether to rotate the landmarks to a canonical palm plane orientation.
+        get_geometric: Whether to compute and append geometric features.
 
     Returns:
-        Normalized flat array of shape (63,).
+        Normalized flat array of shape (63,) or (77,) if get_geometric is True.
     """
     landmarks = raw.reshape(NUM_LANDMARKS, LANDMARK_DIM)  # (21, 3)
 
-    # Step 1: Translation — anchor to wrist (landmark 0)
+    # Step 1: Aspect ratio correction (x_adjusted = x * width / height)
+    aspect_ratio = width / height
+    landmarks[:, 0] = landmarks[:, 0] * aspect_ratio
+
+    # Step 2: Translation — anchor to wrist (landmark 0)
     wrist = landmarks[0].copy()
     landmarks = landmarks - wrist  # all relative to wrist
 
-    # Step 2: Scale — normalize by bounding box diagonal (xy only)
+    # Step 3: (Optional) Rotation alignment (FreiHAND style)
+    if align_rotation:
+        landmarks = align_palm_plane(landmarks)
+
+    # Step 4: Scale — normalize by bounding box diagonal (xy only)
     xy = landmarks[:, :2]  # (21, 2)
     bbox_min = xy.min(axis=0)
     bbox_max = xy.max(axis=0)
@@ -252,11 +360,18 @@ def normalize_landmarks(raw: np.ndarray) -> np.ndarray:
 
     if diagonal < 1e-6:
         # Degenerate case: all landmarks at same point
-        return np.zeros(FEATURE_DIM, dtype=np.float32)
+        base_norm = np.zeros(FEATURE_DIM, dtype=np.float32)
+    else:
+        landmarks = landmarks / diagonal
+        base_norm = landmarks.flatten().astype(np.float32)
 
-    landmarks = landmarks / diagonal
+    if get_geometric:
+        geom = compute_geometric_features(base_norm.reshape(NUM_LANDMARKS, LANDMARK_DIM))
+        return np.concatenate([base_norm, geom]).astype(np.float32)
 
-    return landmarks.flatten().astype(np.float32)
+    return base_norm
+
+
 
 
 # ── Image Crop Extraction ─────────────────────────────────────────────────────
@@ -431,8 +546,25 @@ def process_class(
             skipped += 1
             continue
 
-        # Normalize
-        norm_lm = normalize_landmarks(raw_lm)
+        # Base normalization (optionally aligned)
+        h, w = image.shape[:2]
+        base_norm = normalize_landmarks(
+            raw_lm,
+            width=w,
+            height=h,
+            align_rotation=cfg.align_rotation,
+            get_geometric=False,
+        )
+
+        # Append geometric features if enabled
+        if cfg.get_geometric:
+            norm_lm = np.concatenate([
+                base_norm,
+                compute_geometric_features(base_norm.reshape(NUM_LANDMARKS, LANDMARK_DIM))
+            ]).astype(np.float32)
+        else:
+            norm_lm = base_norm
+
         landmark_vectors.append(norm_lm)
         labels.append(class_index)
 
@@ -449,9 +581,16 @@ def process_class(
 
         # Augmentation
         if cfg.augment:
-            aug_lms = augment_landmarks(norm_lm)
-            for aug in aug_lms[: cfg.aug_factor]:
-                landmark_vectors.append(aug)
+            aug_bases = augment_landmarks(base_norm)
+            for aug_base in aug_bases[: cfg.aug_factor]:
+                if cfg.get_geometric:
+                    aug_lm = np.concatenate([
+                        aug_base,
+                        compute_geometric_features(aug_base.reshape(NUM_LANDMARKS, LANDMARK_DIM))
+                    ]).astype(np.float32)
+                else:
+                    aug_lm = aug_base
+                landmark_vectors.append(aug_lm)
                 labels.append(class_index)
 
     log.info(
@@ -493,6 +632,8 @@ def run_pipeline(cfg: PreprocessConfig) -> dict[str, int]:
     log.info("═" * 60)
     log.info("  Starting preprocessing pipeline for %d class(es)", len(classes_to_process))
     log.info("  Augmentation: %s (×%d per sample)", cfg.augment, cfg.aug_factor)
+    log.info("  Rotation Alignment: %s", cfg.align_rotation)
+    log.info("  Geometric Features: %s", cfg.get_geometric)
     log.info("═" * 60)
 
     for label in classes_to_process:
@@ -506,7 +647,7 @@ def run_pipeline(cfg: PreprocessConfig) -> dict[str, int]:
         log.warning("No data was processed. Check that raw images exist.")
         return {}
 
-    X = np.array(all_landmarks, dtype=np.float32)  # (N, 63)
+    X = np.array(all_landmarks, dtype=np.float32)  # (N, D)
     y = np.array(all_labels, dtype=np.int32)        # (N,)
 
     # Save arrays
@@ -526,10 +667,10 @@ def run_pipeline(cfg: PreprocessConfig) -> dict[str, int]:
     log.info("  ✅ Saved y: %s  shape=%s", out_y.name, y.shape)
     log.info("  ✅ Class map: class_map.json")
     log.info("  Feature dim: %d | Classes: %d | Total samples: %d",
-             FEATURE_DIM, len(set(all_labels)), len(all_labels))
+             X.shape[1], len(set(all_labels)), len(all_labels))
     log.info("═" * 60)
 
-    return {"total_samples": len(all_labels), "feature_dim": FEATURE_DIM}
+    return {"total_samples": len(all_labels), "feature_dim": X.shape[1]}
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -543,6 +684,7 @@ Examples:
   python src/preprocess.py --class_label A
   python src/preprocess.py --all --augment --aug_factor 3
   python src/preprocess.py --all --no_crops
+  python src/preprocess.py --all --align_rotation --get_geometric
         """,
     )
     parser.add_argument("--class_label", type=str, default=None, help="Process single class (default: all)")
@@ -552,6 +694,8 @@ Examples:
     parser.add_argument("--aug_factor", type=int, default=3, help="Augmentation copies per sample (default: 3)")
     parser.add_argument("--no_crops", action="store_true", help="Skip saving image crops for CNN model")
     parser.add_argument("--crop_size", type=int, default=224, help="Image crop size in pixels (default: 224)")
+    parser.add_argument("--align_rotation", action="store_true", help="Enable palm-plane rotation alignment")
+    parser.add_argument("--get_geometric", action="store_true", help="Include 14 scale/rotation invariant geometric features")
     return parser.parse_args()
 
 
@@ -563,6 +707,8 @@ def main() -> None:
         aug_factor=args.aug_factor,
         output_crops=not args.no_crops,
         crop_size=args.crop_size,
+        align_rotation=args.align_rotation,
+        get_geometric=args.get_geometric,
     )
     run_pipeline(cfg)
 

@@ -36,9 +36,21 @@ export default function SentenceBuilder({ currentLetter, onClear }) {
     clearTimeout(holdTimer.current)
     holdStartRef.current = Date.now()
 
+    if (currentLetter === 'nothing') {
+      holdStartRef.current = null
+      return
+    }
+
     holdTimer.current = setTimeout(() => {
-      const id = nextIdRef.current++
-      setChars(prev => [...prev, { id, char: currentLetter }])
+      if (currentLetter === 'space') {
+        const id = nextIdRef.current++
+        setChars(prev => [...prev, { id, char: ' ' }])
+      } else if (currentLetter === 'del') {
+        setChars(prev => prev.slice(0, -1))
+      } else {
+        const id = nextIdRef.current++
+        setChars(prev => [...prev, { id, char: currentLetter }])
+      }
     }, AUTO_COMMIT_MS)
 
     return () => clearTimeout(holdTimer.current)

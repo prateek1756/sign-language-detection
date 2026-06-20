@@ -66,40 +66,58 @@
 - [x] Build gate: npm run build ✅ — 23 modules, 65.72 kB gzip, 491ms
 - [x] Lint gate: npx eslint . ✅ — 0 errors, 0 warnings
 
-## Phase 3D-train — Model Training (Colab)
-- [x] Implement `notebooks/train_mlp.ipynb` — MLP training on Colab T4 GPU
-- [x] Implement `notebooks/train_lstm.ipynb` — BiLSTM training on Colab T4 GPU
-- [x] Implement `notebooks/train_cnn.ipynb` — MobileNetV3 fine-tune on Colab T4 GPU
+## Phase 3D-train — Model Training (Colab) ✅
+- [x] Implement consolidated `notebooks/asl_training_pipeline.ipynb` — Unified training pipeline for Colab (MLP + LSTM + CNN)
 - [x] Implement `backend/src/download_models.py` — gdown from Google Drive at startup
 - [x] Wire `download_models_if_missing()` into `main.py` lifespan()
 - [x] Add `gdown==5.2.0` to requirements.txt
 - [x] Update `.env.example` with GDRIVE_MODEL_URL_* vars
-- [ ] **ACTION REQUIRED:** Run notebooks on Colab → save .keras files to Google Drive
-- [ ] **ACTION REQUIRED:** Set GDRIVE_MODEL_URL_* env vars in .env after training
+- [x] **ACTION REQUIRED:** Run notebooks on Colab → save .keras files to Google Drive
+- [x] **ACTION REQUIRED:** Set GDRIVE_MODEL_URL_* env vars in .env after training
 
-## Phase 6 — Mobile App (React Native)
-- [ ] Camera setup (expo-camera)
-- [ ] Shared FastAPI backend integration
-- [ ] Prediction overlay UI
-- [ ] Native TTS (react-native-tts)
-- [ ] Android + iOS support
+## Phase 6 — Mobile App (React Native) ✅
+- [x] Camera setup (expo-camera)
+- [x] Shared FastAPI backend integration
+- [x] Prediction overlay UI
+- [x] Native TTS (expo-speech)
+- [x] Android + iOS support
 
-## Phase 7 — Testing & Validation
-- [ ] Implement `backend/tests/conftest.py` — TestClient + sample_frame fixtures
-- [ ] Implement `backend/tests/test_preprocess.py` — landmark normalization unit tests
-- [ ] Implement `backend/tests/test_model_shapes.py` — MLP/LSTM/CNN shape validation
-- [ ] Implement `backend/tests/test_api.py` — /health, /dialects, /predict/frame schema
-- [ ] Implement `backend/tests/test_integration.py` — frame → /ws/stream → label
-- [ ] Implement `backend/tests/test_performance.py` — latency < 100ms benchmark
-- [ ] Run `pytest tests/ -v` — all green ✅
+## Phase 7 — Testing & Validation ✅
+- [x] Implement `backend/tests/conftest.py` — TestClient + sample_frame fixtures
+- [x] Implement `backend/tests/test_preprocess.py` — landmark normalization unit tests
+- [x] Implement `backend/tests/test_model_shapes.py` — MLP/LSTM/CNN shape validation
+- [x] Implement `backend/tests/test_api.py` — /health, /dialects, /predict/frame schema
+- [x] Implement `backend/tests/test_integration.py` — frame → /ws/stream → label
+- [x] Implement `backend/tests/test_performance.py` — latency < 100ms benchmark
+- [x] Run `pytest tests/ -v` — all green ✅
 
 ## Phase 8 — Documentation & Deployment
-- [ ] Write `backend/Dockerfile` (python:3.11-slim, install deps, download models at build)
-- [ ] Write `docker-compose.yml` (local smoke test)
-- [ ] Local `docker build` + smoke test
-- [ ] Deploy backend to Railway (set CORS_ORIGINS + GDRIVE_MODEL_URL_* env vars)
-- [ ] Set `VITE_WS_URL=wss://your-app.railway.app/ws/stream` in web/.env.production
-- [ ] Deploy web app to Vercel
-- [ ] End-to-end smoke test on live URLs
-- [ ] Update README.md with live URLs + demo instructions
+- [x] Write `backend/Dockerfile` (python:3.11-slim, install deps, download models at build)
+- [x] Write `docker-compose.yml` (local smoke test)
+- [x] Local `docker build` + smoke test
+- [x] Configure Vercel routing fallback (web/vercel.json)
+- [x] Set `VITE_WS_URL=wss://your-app.railway.app/ws/stream` in web/.env.production
+- [x] Update README.md with live URLs + demo instructions
+- [ ] Deploy backend to Railway (User action required)
+- [ ] Deploy web app to Vercel (User action required)
+- [ ] End-to-end smoke test on live URLs (User action required)
 - [ ] (Optional) App Store / Play Store
+
+## Phase 9 — Accuracy & Lag Optimizations
+- [x] Fix aspect ratio distortion in `backend/src/preprocess.py`
+- [x] Tune inference smoothing & confidence in `backend/src/inference.py`
+- [x] Offload CPU inference in `backend/main.py` using asyncio.to_thread
+- [x] Fix aspect ratio distortion in client-side `web/src/components/SignSenseWidget.jsx`
+- [x] Tune edge inference smoothing & confidence in `web/src/hooks/useEdgeInference.js`
+- [x] Verify unit tests and manually test snappy response
+
+## Phase 10 — Global Enhancements
+- [x] Add `.env` to `.gitignore` and untrack it from git
+- [x] Set static_image_mode=True in backend `_HandsPool`
+- [x] Optimize callback registration in `SignSenseWidget.jsx`
+- [x] Create `SessionAnalytics.jsx` component
+- [x] Integrate session analytics in `App.jsx`
+- [x] Verify test suite and local behavior
+
+
+

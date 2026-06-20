@@ -38,7 +38,7 @@ export default function PredictionPanel({ result, mode }) {
     }
   }, [letter])
 
-  const displayLetter = letter ?? (below ? '?' : null)
+  const displayLetter = letter === 'nothing' ? null : letter === 'space' ? '⎵' : letter === 'del' ? '⌫' : letter ?? (below ? '?' : null)
   const pct = Math.round(confidence * 100)
   const confClass = confidenceClass(confidence)
 

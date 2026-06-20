@@ -24,7 +24,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import cv2
 import mediapipe as mp
@@ -45,9 +45,10 @@ from src.preprocess import normalize_landmarks
 log = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-CONFIDENCE_THRESHOLD = 0.70   # suppress predictions below this
-SMOOTHING_WINDOW     = 10     # rolling majority-vote window size
+CONFIDENCE_THRESHOLD = 0.55   # suppress predictions below this (tuned for better responsiveness)
+SMOOTHING_WINDOW     = 4      # rolling majority-vote window size (tuned from 10 to 4 to reduce lag)
 SEQUENCE_LEN         = 30     # frames for LSTM word mode
+
 
 
 # ── GPU Setup ─────────────────────────────────────────────────────────────────────────
@@ -88,12 +89,13 @@ class _HandsPool:
     def get(self) -> mp.solutions.hands.Hands:
         if not hasattr(self._local, "hands"):
             self._local.hands = mp.solutions.hands.Hands(
-                static_image_mode=True,
+                static_image_mode=True,       # stateless server mode: process frames independently
                 max_num_hands=1,
                 min_detection_confidence=0.5,
                 min_tracking_confidence=0.5,
             )
         return self._local.hands
+
 
 
 _hands_pool = _HandsPool()
@@ -134,7 +136,8 @@ def extract_landmarks_from_image(image_bgr: np.ndarray) -> Optional[np.ndarray]:
         dtype=np.float32,
     ).flatten()  # (63,)
 
-    return normalize_landmarks(raw)
+    h, w = image_bgr.shape[:2]
+    return normalize_landmarks(raw, width=w, height=h)
 
 
 def extract_landmarks_with_viz(
@@ -158,9 +161,11 @@ def extract_landmarks_with_viz(
     raw_list = [{"x": lm.x, "y": lm.y, "z": lm.z} for lm in hand_lm.landmark]
 
     raw = np.array([[lm.x, lm.y, lm.z] for lm in hand_lm.landmark], dtype=np.float32).flatten()
-    normalized = normalize_landmarks(raw)
+    h, w = image_bgr.shape[:2]
+    normalized = normalize_landmarks(raw, width=w, height=h)
 
     return normalized, raw_list
+
 
 
 # ── Temporal Smoother ─────────────────────────────────────────────────────────
@@ -191,36 +196,58 @@ class TemporalSmoother:
 # ── Mode Detector ─────────────────────────────────────────────────────────────
 class ModeDetector:
     """
-    Detects whether the current gesture stream is static (Letter) or dynamic (Word).
-
-    Strategy:
-        - Compute L2 distance between current and previous landmark vector.
-        - If mean motion over last N frames > threshold → dynamic (Word) mode.
-        - Otherwise → static (Letter) mode.
+    Detects whether the current hand gesture is static (Letter) or dynamic (Word).
+    Uses a dual-threshold hysteresis based on fingertip displacement.
     """
 
-    MOTION_THRESHOLD = 0.03  # normalized landmark units
+    START_THRESHOLD = 0.035
+    END_THRESHOLD = 0.015
     WINDOW = 8
+    CONSECUTIVE_FRAMES = 3
 
     def __init__(self) -> None:
+        self.state = "letter"  # "letter" (static) or "word" (moving)
         self._motion: collections.deque[float] = collections.deque(maxlen=self.WINDOW)
-        self._prev: Optional[np.ndarray] = None
+        self._prev_tips: Optional[np.ndarray] = None
+        self._stop_counter = 0
 
     def update(self, landmarks: np.ndarray) -> str:
         """Returns 'letter' or 'word'."""
-        if self._prev is not None:
-            motion = float(np.linalg.norm(landmarks - self._prev))
-            self._motion.append(motion)
-        self._prev = landmarks.copy()
+        # landmarks is shape (63,)
+        lms = landmarks.reshape(21, 3)
+        # Slices coordinates of 5 fingertips: 4, 8, 12, 16, 20
+        tips = lms[[4, 8, 12, 16, 20]]
+
+        if self._prev_tips is not None:
+            # Average displacement of fingertips
+            disp = float(np.mean(np.linalg.norm(tips - self._prev_tips, axis=1)))
+            self._motion.append(disp)
+        self._prev_tips = tips.copy()
 
         if len(self._motion) < 3:
-            return "letter"
+            return self.state
+
         mean_motion = float(np.mean(self._motion))
-        return "word" if mean_motion > self.MOTION_THRESHOLD else "letter"
+
+        if self.state == "letter":
+            if mean_motion > self.START_THRESHOLD:
+                self.state = "word"
+                self._stop_counter = 0
+        else:  # state is "word"
+            if mean_motion < self.END_THRESHOLD:
+                self._stop_counter += 1
+                if self._stop_counter >= self.CONSECUTIVE_FRAMES:
+                    self.state = "letter"
+            else:
+                self._stop_counter = 0
+
+        return self.state
 
     def reset(self) -> None:
+        self.state = "letter"
         self._motion.clear()
-        self._prev = None
+        self._prev_tips = None
+        self._stop_counter = 0
 
 
 # ── Inference Engine (main class) ─────────────────────────────────────────────
@@ -243,9 +270,9 @@ class InferenceEngine:
         self._dialect   = dialect
         self._seq_len   = sequence_len
 
-        self._mlp:  Optional[tf.keras.Model] = None
-        self._lstm: Optional[tf.keras.Model] = None
-        self._cnn:  Optional[tf.keras.Model] = None
+        self._mlp:  Optional[Any] = None
+        self._lstm: Optional[Any] = None
+        self._cnn:  Optional[Any] = None
 
         self._lock        = threading.Lock()
         self._smoother    = TemporalSmoother(smoothing_window)
@@ -254,7 +281,17 @@ class InferenceEngine:
 
     # ── Lazy model loaders ────────────────────────────────────────────────
 
-    def _load_mlp(self) -> Optional[tf.keras.Model]:
+    def _load_mlp(self) -> Optional[Any]:
+        try:
+            import onnxruntime as ort
+            path = MODELS_DIR / "asl_mlp.onnx"
+            if path.exists():
+                session = ort.InferenceSession(str(path))
+                log.info("✅ MLP loaded from ONNX: %s", path.name)
+                return session
+        except Exception as exc:
+            log.debug("ONNX MLP load failed, falling back to Keras: %s", exc)
+
         path = MODELS_DIR / "asl_mlp.keras"
         if not path.exists():
             path = MODELS_DIR / "asl_mlp_best.keras"
@@ -262,10 +299,20 @@ class InferenceEngine:
             log.warning("MLP model not found at %s", MODELS_DIR)
             return None
         model = tf.keras.models.load_model(str(path))
-        log.info("✅ MLP loaded from %s", path.name)
+        log.info("✅ MLP loaded from Keras: %s", path.name)
         return model
 
-    def _load_lstm(self) -> Optional[tf.keras.Model]:
+    def _load_lstm(self) -> Optional[Any]:
+        try:
+            import onnxruntime as ort
+            path = MODELS_DIR / "asl_lstm.onnx"
+            if path.exists():
+                session = ort.InferenceSession(str(path))
+                log.info("✅ LSTM loaded from ONNX: %s", path.name)
+                return session
+        except Exception as exc:
+            log.debug("ONNX LSTM load failed, falling back to Keras: %s", exc)
+
         path = MODELS_DIR / "asl_lstm.keras"
         if not path.exists():
             path = MODELS_DIR / "asl_lstm_best.keras"
@@ -273,16 +320,26 @@ class InferenceEngine:
             log.warning("LSTM model not found at %s", MODELS_DIR)
             return None
         model = tf.keras.models.load_model(str(path))
-        log.info("✅ LSTM loaded from %s", path.name)
+        log.info("✅ LSTM loaded from Keras: %s", path.name)
         return model
 
-    def _load_cnn(self) -> Optional[tf.keras.Model]:
+    def _load_cnn(self) -> Optional[Any]:
+        try:
+            import onnxruntime as ort
+            path = MODELS_DIR / "asl_mobilenet.onnx"
+            if path.exists():
+                session = ort.InferenceSession(str(path))
+                log.info("✅ CNN loaded from ONNX: %s", path.name)
+                return session
+        except Exception as exc:
+            log.debug("ONNX CNN load failed, falling back to Keras: %s", exc)
+
         path = MODELS_DIR / "asl_mobilenet.keras"
         if not path.exists():
             log.warning("CNN model not found at %s", MODELS_DIR)
             return None
         model = tf.keras.models.load_model(str(path))
-        log.info("✅ CNN loaded from %s", path.name)
+        log.info("✅ CNN loaded from Keras: %s", path.name)
         return model
 
     def ensure_models_loaded(self) -> dict[str, bool]:
@@ -330,21 +387,38 @@ class InferenceEngine:
                 if self._mlp is None:  # double-checked locking
                     self._mlp = self._load_mlp()
 
+        if not hasattr(self, "_frame_count"):
+            self._frame_count = 0
+        self._frame_count += 1
+
         image = decode_base64_image(b64_image)
         if image is None:
+            if self._frame_count % 30 == 0:
+                log.warning("[DEBUG] Failed to decode base64 image")
             return self._error_response("Invalid image data", t0)
 
         landmarks, raw_lm = extract_landmarks_with_viz(image)
         if landmarks is None:
+            if self._frame_count % 30 == 0:
+                log.info(f"[DEBUG] Frame processed. Image shape: {image.shape if image is not None else 'None'}. Hand detected: False")
             return self._no_hand_response(t0)
 
+        if self._frame_count % 30 == 0:
+            log.info(f"[DEBUG] Frame processed. Image shape: {image.shape}. Hand detected: True")
+
         # Update mode detector
+        prev_mode = self._mode_det.state
         mode = self._mode_det.update(landmarks)
+        gesture_ended = (prev_mode == "word" and mode == "letter")
 
         # MLP inference
         x = landmarks[np.newaxis, :]               # (1, 63)
         if self._mlp is not None:
-            proba = self._mlp.predict(x, verbose=0)[0]  # (29,)
+            if hasattr(self._mlp, "run"):
+                input_name = self._mlp.get_inputs()[0].name
+                proba = self._mlp.run(None, {input_name: x.astype(np.float32)})[0][0]
+            else:
+                proba = self._mlp.predict(x, verbose=0)[0]  # (29,)
         else:
             # Fallback: uniform distribution (no model trained yet)
             proba = np.ones(NUM_CLASSES) / NUM_CLASSES
@@ -354,15 +428,17 @@ class InferenceEngine:
 
         # Confidence gate
         if best_conf < self._threshold:
-            self._smoother.reset()
+            # DO NOT reset smoother on transient dropouts
             return {
                 "letter":     None,
                 "confidence": round(best_conf, 4),
                 "mode":       mode,
+                "gesture_ended": gesture_ended,
                 "landmarks":  raw_lm,
                 "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
                 "below_threshold": True,
             }
+
 
         # Temporal smoothing
         smoothed_idx  = self._smoother.push(best_idx)
@@ -377,6 +453,7 @@ class InferenceEngine:
             "confidence":      round(smoothed_conf, 4),
             "top3":            self._top3(proba),
             "mode":            mode,
+            "gesture_ended":   gesture_ended,
             "landmarks":       raw_lm,
             "smoothed":        self._smoother.filled,
             "below_threshold": False,
@@ -438,7 +515,11 @@ class InferenceEngine:
         seq = np.stack(seq_landmarks, axis=0)[np.newaxis, :, :]  # (1, T, 63)
 
         if self._lstm is not None:
-            proba = self._lstm.predict(seq, verbose=0)[0]
+            if hasattr(self._lstm, "run"):
+                input_name = self._lstm.get_inputs()[0].name
+                proba = self._lstm.run(None, {input_name: seq.astype(np.float32)})[0][0]
+            else:
+                proba = self._lstm.predict(seq, verbose=0)[0]
         else:
             proba = np.ones(NUM_CLASSES) / NUM_CLASSES
 
@@ -475,7 +556,11 @@ class InferenceEngine:
         x = np.expand_dims(crop, 0).astype(np.float32)  # (1, 224, 224, 3)
 
         if self._cnn is not None:
-            proba = self._cnn.predict(x, verbose=0)[0]
+            if hasattr(self._cnn, "run"):
+                input_name = self._cnn.get_inputs()[0].name
+                proba = self._cnn.run(None, {input_name: x.astype(np.float32)})[0][0]
+            else:
+                proba = self._cnn.predict(x, verbose=0)[0]
         else:
             proba = np.ones(NUM_CLASSES) / NUM_CLASSES
 

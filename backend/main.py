@@ -18,8 +18,7 @@ Features:
   - Structured JSON error responses
 """
 
-from __future__ import annotations
-
+import asyncio
 import json
 import logging
 import os
@@ -233,7 +232,7 @@ async def predict_frame(request: Request, body: FrameRequest):
     - Returns smoothed prediction via rolling majority vote (last 10 frames)
     """
     engine = _get_engine(request)
-    result = engine.predict_frame(body.image)
+    result = await asyncio.to_thread(engine.predict_frame, body.image)
 
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
@@ -263,7 +262,7 @@ async def predict_sequence(request: Request, body: SequenceRequest):
     - Returns word prediction with confidence
     """
     engine = _get_engine(request)
-    result = engine.predict_sequence(body.frames)
+    result = await asyncio.to_thread(engine.predict_sequence, body.frames)
 
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
@@ -288,7 +287,7 @@ async def predict_frame_cnn(request: Request, body: FrameRequest):
     partial hand occlusion). Slower than MLP but more robust.
     """
     engine = _get_engine(request)
-    result = engine.predict_frame_cnn(body.image)
+    result = await asyncio.to_thread(engine.predict_frame_cnn, body.image)
 
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
@@ -379,21 +378,30 @@ async def websocket_stream(websocket: WebSocket):
 
             if mode == "letter":
                 word_frame_buffer.clear()  # reset buffer when switching modes
-                result = engine.predict_frame(b64_image)
+                result = await asyncio.to_thread(engine.predict_frame, b64_image)
             else:
-                # Word mode: buffer frames until seq_len reached, then run LSTM
-                word_frame_buffer.append(b64_image)
-                if len(word_frame_buffer) >= engine._seq_len:
-                    result = engine.predict_sequence(word_frame_buffer[:])
+                # Word mode:
+                frame_res = await asyncio.to_thread(engine.predict_frame, b64_image)
+                if frame_res.get("gesture_ended"):
+                    # Hand slowed down -> Trigger sequence prediction on collected buffer
+                    result = await asyncio.to_thread(engine.predict_sequence, word_frame_buffer[:])
                     word_frame_buffer.clear()
-                else:
-                    # Not enough frames yet — send progress to client
+                    result["gesture_ended"] = True
+                elif frame_res.get("mode") == "word":
+                    # Hand is moving -> Keep buffering
+                    word_frame_buffer.append(b64_image)
+                    if len(word_frame_buffer) > engine._seq_len:
+                        word_frame_buffer.pop(0)
                     result = {
-                        "buffering":      True,
+                        "buffering": True,
                         "frames_buffered": len(word_frame_buffer),
-                        "frames_needed":  engine._seq_len,
-                        "mode":           "word",
+                        "mode": "word",
+                        "latency_ms": frame_res.get("latency_ms", 0.0),
                     }
+                else:
+                    # Hand is static in word mode -> Return frame prediction
+                    result = frame_res
+
             if "mode" not in result:
                 result["mode"] = mode
 
